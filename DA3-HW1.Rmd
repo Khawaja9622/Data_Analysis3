@@ -1,0 +1,49 @@
+---
+title: "DA 3"
+author: "Khawaja Hassan"
+date: "1/23/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+# Import libraries
+library(tidyverse)
+library(lspline)
+library(cowplot)
+library(boot)
+library(estimatr)
+library(huxtable)
+library(stargazer)
+library(modelsummary)
+library(kableExtra)
+library(dplyr)
+library(data.table)
+#install.packages("data.table")
+#install.packages("kableExtra")
+getwd()
+setwd("/Users/khawajahassan/BA21_Coding/Assignment_1/")
+```
+
+```{r, include= F}
+# set data dir, load theme and functions
+dir <- "/Users/khawajahassan/BA21_Coding/Assignment_1/"
+
+source(paste0(dir, "da_helper_function.R"))
+source(paste0(dir, "theme_bg.R"))
+
+
+# Importing the data
+data_org <- read_csv("https://osf.io/4ay9x/download")
+
+
+```
+
+```{r,include=FALSE, warning=FALSE}
+
+#SELECT OCCUPATION
+# keep only financial analyst
+data <- data_all %>% filter(occ2012==0840)
+
+```
+
