@@ -5,11 +5,9 @@ date: "1/23/2022"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, echo=FALSE,include=FALSE}
 
 rm(list=ls())
-
-library(gridExtra)
 #####################
 ## Import libraries##
 #####################
@@ -34,16 +32,10 @@ library(gridExtra)
 
 ```
 
-```{r, include= F}
+```{r, echo=FALSE,include=FALSE}
 ###########################################
 ## Set data dir, load theme and functions##
 ###########################################
-
-dir <- "/Users/khawajahassan/BA21_Coding/Assignment_1/"
-
-source(paste0(dir, "da_helper_function.R"))
-source(paste0(dir, "theme_bg.R"))
-
 
 # Importing the data
 data_org <- fread("https://osf.io/4ay9x/download")
@@ -52,7 +44,7 @@ data_org <- fread("https://osf.io/4ay9x/download")
 
 ```
 
-```{r,include=FALSE, warning=FALSE}
+```{r,echo=FALSE, warning=FALSE}
 
 ################
 # Data Munging #
@@ -97,7 +89,7 @@ dt <- dt[, ethnic := NULL]
 ```
 
 
-```{r}
+```{r,echo=FALSE}
 # Creating levels for grade92 variable in a new variable educ#
 dt <- dt[grade92 == 43, educ := "Bachelors"]
 dt <-dt[grade92 == 44, educ := "Masters"]
@@ -199,7 +191,7 @@ dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012,stfips,state))
 
 ```
 
-```{r}
+```{r, echo=FALSE}
 ###############################
 ##Setting models interactions##
 ###############################
@@ -353,18 +345,22 @@ White_Status<- ggplot(dt, aes(x = factor(married_status), y = w,
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
-#10#(ask aftab)
+#10#
 datasummary(w*factor(educ)*region  ~ N + Percent() + Mean, data = dt )#4
 #11#
 datasummary(w*origin*factor(educ)  ~ N + Percent() + Mean, data = dt) 
 # not including since the wage differential is minor and number of observation for Professional school is only 1
+
 #12#
 datasummary(w*factor(ownchild)*factor(gender) ~ N + Percent() + Mean, data = dt )
 # not including since the wage differential is minor
 
+#13#
+atasummary(w*factor(educ)*factor(white)  ~ N + Percent() + Mean, data = dt )#3
+
 ```
 
-```{r}
+```{r,echo=FALSE,include=FALSE}
 ###################################
 ## Setting up Regressions models ##
 ###################################
@@ -373,9 +369,9 @@ model1 <- as.formula(w ~ educ)
 
 model2 <- as.formula(w ~ educ+age+agesq)
 
-model3 <- as.formula(w ~ educ+age+agesq+region+ownchild+w*factor(white)*gender+w*married_status*gender+w*unionmme*Sector+w*unionmme*gender)
+model3 <- as.formula(w ~ educ+age+agesq+region+ownchild+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender)
 
-model4 <- as.formula(w ~ educ+age+agesq+region+ownchild+w*factor(white)*gender+w*married_status*gender+w*unionmme*Sector+w*unionmme*gender+w*factor(educ)*region+w*factor(white)*factor(married_status)+w*Sector*region+w*unionmme*gender+w*Sector*gender)
+model4 <- as.formula(w ~ educ+age+agesq+region+ownchild+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender+factor(educ)*region+factor(white)*factor(married_status)+Sector*region+unionmme*gender+Sector*gender)
 
 
 ### Running the regressions
@@ -459,9 +455,10 @@ ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
 ggplot(dt, aes(x=predict(reg3, dt), y=w)) + 
   geom_point(alpha = 0.5) +
   geom_abline(intercept = 0, slope = 1, size = 0.5) +
-  scale_x_continuous(limits = c(0,30)) + 
+  scale_x_continuous(limits = c(0,40)) + 
   scale_y_continuous(limits = c(0,60)) +
   ggthemes::theme_economist()
+
 ```
 
 ```{r}
@@ -475,4 +472,18 @@ grid.arrange( Union_Sector,white_gender,White_Status, nrow = 2, ncol = 2)
 
 
 ```
+
+## Introduction ##
+ 
+The purpose of this project was to run analysis and prediction of [Occupational& Earning data set](https://osf.io/g8p9j/) with Regression Analysis. The ultimate goal was to optimize prediction model for the hourly earning based on a particular occupation to capture their interaction with the predictors. The occupation selected for our analysis was Secondary school teachers and their codes are provided in on the following [link](https://osf.io/57n9q/). 
+
+## Data Cleaning & Munging ##
+
+The choice of occupation for our model was *Secondary Teacher* and the number observation after we filter it came around was 1100. However, before the data had to be modified before we could actually run our regression model and make our predictive analysis. The data cleaning was divided into three major parts filtering, adding categorical & binary variables and dropping columns which were not relevant or had missing values. For filtering, we included only those people whose minimum hour were greater than 40 to account for only full-time employees and dropped observation whose education level was less Bachelor Degree.Secondly, for the variables like married status, gender, class , state ,citizenship status we group them and made new categorical variable since the variation between the given categories were not that significant. Lastly, we dropped ethnic column since more than 90 percent of observation were missing , along with we removed the columns that were not used in our models.
+
+## Variable Interaction ##
+
+Before we could start running regression model we had to account for the interaction between the variable and decide which predictor to choose. The base for selection of predictor was if the wage differential was greater than $2 and the number of observation were sufficient enough to make a comparison. Since we are looking at hourly wage even 2 dollar difference would make a huge difference if we see the weekly or the monthly scale.
+
+
 
