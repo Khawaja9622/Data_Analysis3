@@ -9,6 +9,7 @@ output: pdf_document
 
 rm(list=ls())
 
+library(gridExtra)
 #####################
 ## Import libraries##
 #####################
@@ -24,6 +25,12 @@ library(modelsummary)
 library(kableExtra)
 library(dplyr)
 library(data.table)
+library(fixest)
+library(caret)
+library(skimr)
+library(grid)
+library(glmnet)
+library(gridExtra)
 
 ```
 
@@ -180,8 +187,15 @@ dt <- dt %>% select(-prcitshp)
 
 datasummary( w*factor(origin) ~ N + Percent() + Mean, data = dt ) 
 
+##Creating region baased on states, Used Aftabs ideas to group these codes in region 
+
+dt <- dt[stfips %in% c("WA", "OR", "MT", "ID", "WY", "NV", "UT", "CO", "AZ", "NM", "HI", "AK", "CA"), region := "west"]
+dt <- dt[stfips %in% c("ND", "SD", "NE", "KS", "MN", "IA", "MO", "WI", "IL", "IN", "MI", "OH"), region := "mid-west"]
+dt <- dt[stfips %in% c("OK", "TX", "AR", "LA", "KY", "TN", "MS", "AL", "WV", "VA", "NC", "SC", "GA", "FL", "DC","MD","DE"), region := "south"]
+dt <- dt[stfips %in% c("PA", "NY", "VT", "NH", "ME","MA","RI","CT","NJ"), region := "north-east"]
+
 # excluding unwanted variable
-dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012))
+dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012,stfips,state))
 
 ```
 
@@ -190,6 +204,7 @@ dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012))
 ##Setting models interactions##
 ###############################
 
+#1#
 datasummary( w*factor(white)*gender ~ N + Percent() + Mean, data = dt ) 
 # wage is  very different based on white and gender, so  interaction needed
 
@@ -207,7 +222,7 @@ white_gender <- ggplot(dt, aes(x = factor(white), y = w,
   ggthemes::theme_economist() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
-
+#2#
 datasummary( w*factor(educ)*gender ~ N + Percent() + Mean, data = dt )
 # wage is very different based on education and gender
 
@@ -226,7 +241,7 @@ educ_gender <- ggplot(dt, aes(x = factor(educ), y = w,
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
-
+#3#
 datasummary( w*married_status*gender ~ N + Percent() + Mean, data = dt )#3
 # wage is very different based on , married_status and gender
 
@@ -244,9 +259,9 @@ Status_gender <- ggplot(dt, aes(x = factor(married_status), y = w,
   ggthemes::theme_economist() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
+#4#
 
-
-datasummary( w*Sector*gender ~ N + Percent() + Mean, data = dt )#3
+datasummary( w*Sector*gender ~ N + Percent() + Mean, data = dt )#4
 # wage is very different based on education and gender
 
 ## Boxplot##
@@ -264,8 +279,8 @@ Sector_gender <- ggplot(dt, aes(x = factor(Sector), y = w,
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
-
-datasummary( w*unionmme*gender ~ N + Percent() + Mean, data = dt ) #3
+#5#
+datasummary( w*unionmme*gender ~ N + Percent() + Mean, data = dt ) #4
 
 
 ## Boxplot##
@@ -282,23 +297,181 @@ Union_gender <- ggplot(dt, aes(x = factor(unionmme), y = w,
   ggthemes::theme_economist() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
+#6#
 datasummary( w*unionmme*Sector ~ N + Percent() + Mean, data = dt )#3
 
-datasummary( w*origin*Sector ~ N + Percent() + Mean, data = dt )
+## Boxplot##
+Union_Sector <- ggplot(dt, aes(x = factor(unionmme), y = w,
+                              fill = factor(Sector), color=factor(Sector))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Union Membership",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+#7#
+datasummary( w*origin*Sector ~ N + Percent() + Mean, data = dt ) # not including since the wage differential is low
  #wage is not very different
 
-datasummary(w*Sector*stfips ~ N + Percent() + Mean, data = dt)
+#8#
+datasummary(w*Sector*region ~ N + Percent() + Mean, data = dt)#4
 
-datasummary(w*factor(white)*factor(married_status)  ~ N + Percent() + Mean, data = dt )#3
+## Boxplot##
+Sector_Region<- ggplot(dt, aes(x = factor(region), y = w,
+                              fill = factor(Sector), color=factor(Sector))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Region",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+#9#
+datasummary(w*factor(white)*factor(married_status)  ~ N + Percent() + Mean, data = dt )#4
+
+## Boxplot##
+White_Status<- ggplot(dt, aes(x = factor(married_status), y = w,
+                              fill = factor(white), color=factor(white))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Marriage Status",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
-datasummary(w*factor(educ)*Sector  ~ N + Percent() + Mean, data = dt )#3
+#10#(ask aftab)
+datasummary(w*factor(educ)*region  ~ N + Percent() + Mean, data = dt )#4
+#11#
+datasummary(w*origin*factor(educ)  ~ N + Percent() + Mean, data = dt) 
+# not including since the wage differential is minor and number of observation for Professional school is only 1
+#12#
+datasummary(w*factor(ownchild)*factor(gender) ~ N + Percent() + Mean, data = dt )
+# not including since the wage differential is minor
 
-datasummary(w*origin*factor(educ)  ~ N + Percent() + Mean, data = dt)
+```
 
-ggplot(data=dt, aes(x=(age^2),y=w))+
-  geom_smooth()
+```{r}
+###################################
+## Setting up Regressions models ##
+###################################
 
+model1 <- as.formula(w ~ educ)
+
+model2 <- as.formula(w ~ educ+age+agesq)
+
+model3 <- as.formula(w ~ educ+age+agesq+region+ownchild+w*factor(white)*gender+w*married_status*gender+w*unionmme*Sector+w*unionmme*gender)
+
+model4 <- as.formula(w ~ educ+age+agesq+region+ownchild+w*factor(white)*gender+w*married_status*gender+w*unionmme*Sector+w*unionmme*gender+w*factor(educ)*region+w*factor(white)*factor(married_status)+w*Sector*region+w*unionmme*gender+w*Sector*gender)
+
+
+### Running the regressions
+reg1 <- feols(model1, data = dt , vcov="hetero")
+reg2 <- feols(model2, data = dt , vcov="hetero")
+reg3 <- feols(model3, data = dt , vcov="hetero")
+reg4 <- feols(model4, data = dt , vcov="hetero")
+
+
+ # evaluation of the models: using all the sample#
+fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")           
+etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
+
+
+#####################
+# Cross-validation for better evaluation of predictive performance
+# Simple k-fold cross validation setup:
+# 1) Used method for estimating the model: "lm" - linear model (y_hat = b0+b1*x1+b2*x2 + ...)
+# 2) set number of folds to use (must be less than the no. observations)
+k <- 4
+
+# We use the 'train' function which allows many type of model training -> use cross-validation
+set.seed(200)
+cv1 <- train(model1, dt, method = "lm", trControl = trainControl(method = "cv", number = k))
+
+# Check the output:
+cv1
+summary(cv1)
+cv1$results
+cv1$resample
+
+set.seed(200)
+cv2 <- train(model2, dt, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(200)
+cv3 <- train(model3, dt, method = "lm", trControl = trainControl(method = "cv", number = k), na.action = "na.omit")
+set.seed(200)
+cv4 <- train(model4, dt, method = "lm", trControl = trainControl(method = "cv", number = k), na.action = "na.omit")
+
+# Calculate RMSE for each fold and the average RMSE as well
+cv <- c("cv1", "cv2", "cv3", "cv4")
+rmse_cv <- c()
+
+for(i in 1:length(cv)){
+  rmse_cv[i] <- sqrt((get(cv[i])$resample[[1]][1]^2 +
+                        get(cv[i])$resample[[1]][2]^2 +
+                        get(cv[i])$resample[[1]][3]^2 +
+                        get(cv[i])$resample[[1]][4]^2)/4)
+}
+
+
+# summarize results
+cv_mat <- data.frame(rbind(cv1$resample[4], "Average"),
+                     rbind(cv1$resample[1], rmse_cv[1]),
+                     rbind(cv2$resample[1], rmse_cv[2]),
+                     rbind(cv3$resample[1], rmse_cv[3]),
+                     rbind(cv4$resample[1], rmse_cv[4])
+)
+
+colnames(cv_mat)<-c("Resample","Model1", "Model2", "Model3", "Model4")
+cv_mat 
+
+# Show model complexity and out-of-sample RMSE performance
+m_comp <- c()
+models <- c("reg1", "reg2", "reg3", "reg4")
+for( i in 1 : length(cv) ){
+  m_comp[ i ] <- length( get( models[i] )$coefficient  - 1 ) 
+}
+
+m_comp <- tibble( model = models , 
+                  complexity = m_comp,
+                  RMSE = rmse_cv )
+
+ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
+  geom_point(color='red',size=2) +
+  geom_line(color='blue',size=0.5)+
+  labs(x='Number of explanatory variables',y='Averaged RMSE on test samples',
+       title='Prediction performance and model compexity') +
+  ggthemes::theme_economist()
+
+# plotting results
+ggplot(dt, aes(x=predict(reg3, dt), y=w)) + 
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5) +
+  scale_x_continuous(limits = c(0,30)) + 
+  scale_y_continuous(limits = c(0,60)) +
+  ggthemes::theme_economist()
+```
+
+```{r}
+
+## Arranging interaction plots into a grid for better presentation
+
+grid.arrange(Sector_gender, Sector_Region, Status_gender, Union_gender,
+             nrow = 2, ncol = 2)
+
+grid.arrange( Union_Sector,white_gender,White_Status, nrow = 2, ncol = 2)
 
 
 ```
