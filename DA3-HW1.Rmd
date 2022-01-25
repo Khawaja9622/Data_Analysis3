@@ -6,8 +6,13 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
+
 rm(list=ls())
-# Import libraries
+
+#####################
+## Import libraries##
+#####################
+
 library(tidyverse)
 library(lspline)
 library(cowplot)
@@ -19,14 +24,14 @@ library(modelsummary)
 library(kableExtra)
 library(dplyr)
 library(data.table)
-#install.packages("data.table")
-#install.packages("kableExtra")
-getwd()
-setwd("/Users/khawajahassan/BA21_Coding/Assignment_1/")
+
 ```
 
 ```{r, include= F}
-# set data dir, load theme and functions
+###########################################
+## Set data dir, load theme and functions##
+###########################################
+
 dir <- "/Users/khawajahassan/BA21_Coding/Assignment_1/"
 
 source(paste0(dir, "da_helper_function.R"))
@@ -34,16 +39,267 @@ source(paste0(dir, "theme_bg.R"))
 
 
 # Importing the data
-data_org <- read_csv("https://osf.io/4ay9x/download")
+data_org <- fread("https://osf.io/4ay9x/download")
+
 
 
 ```
 
 ```{r,include=FALSE, warning=FALSE}
 
-#SELECT OCCUPATION
-# keep only financial analyst
-data <- data_all %>% filter(occ2012==0840)
+################
+# Data Munging #
+################
+
+# Counting Number of Observation in each Occupation 
+data_org[,.(Count=.N),by=occ2012]
+
+# Filtering the data for the chosen occupation (Secondary-Teacher)
+dt <- data_org %>% filter(occ2012==2320)
+rm(data_org)
+dt <-  data.table(dt)
+
+# Creating a new wage per hour variable w
+dt <- dt[, w := earnwke/uhours]
+
+# Filtering on uhours to work on full time employee (minimum 40 hours)/181 employee dropped since they were working less than 40 hours 
+
+dt <- dt[uhours >= 40]
+
+# counting Number observation in each Education Level
+# Filter:Bachelor's degree or Higher (dropping 11 observation )
+
+dt[,.(count=.N), by= grade92]
+dt <- dt[grade92 >= 43]
+
+# Checking age greater than 20/ Min age is 22 with sufficient observation
+dt[,.(count=.N), by= age]
+
+# Looking at a quick summary of some of the key variables
+datasummary(w + grade92 + age ~ Mean + SD + Min + Max + P25 + P75 + N , data = dt)
+
+# Finding missing values
+
+to_filter <- sapply(dt, function(x) sum(is.na(x)))
+to_filter[to_filter > 0]
+
+# dropping the ethnic column since there are 919 NA observation in the column 
+dt <- dt[, ethnic := NULL]
+
+
+```
+
+
+```{r}
+# Creating levels for grade92 variable in a new variable educ#
+dt <- dt[grade92 == 43, educ := "Bachelors"]
+dt <-dt[grade92 == 44, educ := "Masters"]
+dt <-dt[grade92 == 45, educ := "Professional-School"]
+dt <-dt[grade92 == 46, educ := "Doctorate degree"]
+
+dt <- dt[, grade92 := NULL]
+
+# Creating age squared column
+
+dt <- dt[, agesq := age^2]
+
+# checking result
+datasummary(w*factor(educ) + age ~ Mean + SD + Min + Max + P25 + P75 + N , data = dt)
+
+# Race
+
+datasummary( w*factor(race) ~ N + SD +Percent() + Mean, data = dt )
+# creating binary for white and non white
+dt$white <- ifelse(dt$race==1,1,0)
+dt <- dt %>%
+  select(-c(race))
+
+# Creating factor sex variable
+
+dt <- dt[sex == 1, gender := "male"]
+dt <- dt[sex == 2, gender := "female"]
+dt <- dt %>%
+  select(-c(sex))
+
+# Creating factor variable for marital variable
+
+dt[marital <= 2, married_status := "married"]
+dt[marital <= 6 & marital >= 3, married_status := "separated"]
+dt[marital == 7, married_status := "never married"]
+dt <- dt %>%
+  select(-c(marital))
+
+
+# Ownchild
+
+dt[,.(count=.N), by= ownchild]
+
+# Create if individuals own child or no
+  dt <- dt %>% mutate(ownchild=case_when(
+  ownchild==0 ~ 0,
+  TRUE ~ 1))
+ datasummary( w*factor(ownchild) ~ N + SD + Mean, data = dt ) 
+  
+# dropping as it is the same as own child
+dt <- dt %>%
+  select(-chldpres)
+
+# ind02( only elementary school)
+datasummary( w*(ind02) ~ N + Percent() + Mean, data = dt ) 
+# exclude from model
+dt <- dt %>% select(-ind02)
+
+# class
+datasummary( w*factor(class) ~ N + Percent() + Mean, data = dt ) 
+# include as factor
+dt <- dt[class == "Government - Federal"| class=="Government - Local"|class=="Government - State", Sector := "Government"]
+dt <- dt[class == "Private, For Profit"| class=="Private, Nonprofit", Sector := "Private"]
+
+datasummary( w*factor(Sector) ~ N + Percent() + Mean, data = dt ) 
+dt <- dt %>% select(-class)
+
+
+# unionmme
+datasummary( w*factor(unionmme) ~ N + Percent() + Mean, data = dt ) 
+
+# state 
+datasummary( w*factor(state) ~ N + Percent() + Mean, data = dt ) 
+
+# lfsr94(mean difference is minor between these two so excluding from)
+datasummary( w*factor(lfsr94) ~ N + Percent() + Mean, data = dt ) 
+# exclude from model
+dt <- dt %>% select(-lfsr94)
+
+# prcitshp
+datasummary( w*factor(prcitshp) ~ N + Percent() + Mean, data = dt ) 
+
+dt <- dt[prcitshp=="Native, Born Abroad Of US Parent(s)"|prcitshp=="Native, Born in PR or US Outlying Area"|prcitshp=="Native, Born In US",origin := "Native"]
+dt <- dt[prcitshp=="Foreign Born, Not a US Citizen"|prcitshp=="Foreign Born, US Cit By Naturalization",origin := "Foreign "]
+
+dt <- dt %>% select(-prcitshp)
+
+datasummary( w*factor(origin) ~ N + Percent() + Mean, data = dt ) 
+
+# excluding unwanted variable
+dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012))
+
+```
+
+```{r}
+###############################
+##Setting models interactions##
+###############################
+
+datasummary( w*factor(white)*gender ~ N + Percent() + Mean, data = dt ) 
+# wage is  very different based on white and gender, so  interaction needed
+
+#Boxplot#
+white_gender <- ggplot(dt, aes(x = factor(white), y = w,
+                              fill = factor(gender), color=factor(gender))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Race",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+
+datasummary( w*factor(educ)*gender ~ N + Percent() + Mean, data = dt )
+# wage is very different based on education and gender
+
+## Boxplot##
+educ_gender <- ggplot(dt, aes(x = factor(educ), y = w,
+                              fill = factor(gender), color=factor(gender))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Education",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+
+
+datasummary( w*married_status*gender ~ N + Percent() + Mean, data = dt )#3
+# wage is very different based on , married_status and gender
+
+## Boxplot##
+Status_gender <- ggplot(dt, aes(x = factor(married_status), y = w,
+                              fill = factor(gender), color=factor(gender))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Married status",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+
+
+datasummary( w*Sector*gender ~ N + Percent() + Mean, data = dt )#3
+# wage is very different based on education and gender
+
+## Boxplot##
+Sector_gender <- ggplot(dt, aes(x = factor(Sector), y = w,
+                              fill = factor(gender), color=factor(gender))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Sector",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+
+
+datasummary( w*unionmme*gender ~ N + Percent() + Mean, data = dt ) #3
+
+
+## Boxplot##
+Union_gender <- ggplot(dt, aes(x = factor(unionmme), y = w,
+                              fill = factor(gender), color=factor(gender))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Union Membership",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
+
+datasummary( w*unionmme*Sector ~ N + Percent() + Mean, data = dt )#3
+
+datasummary( w*origin*Sector ~ N + Percent() + Mean, data = dt )
+ #wage is not very different
+
+datasummary(w*Sector*stfips ~ N + Percent() + Mean, data = dt)
+
+datasummary(w*factor(white)*factor(married_status)  ~ N + Percent() + Mean, data = dt )#3
+
+
+datasummary(w*factor(educ)*Sector  ~ N + Percent() + Mean, data = dt )#3
+
+datasummary(w*origin*factor(educ)  ~ N + Percent() + Mean, data = dt)
+
+ggplot(data=dt, aes(x=(age^2),y=w))+
+  geom_smooth()
+
+
 
 ```
 
