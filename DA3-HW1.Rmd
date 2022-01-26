@@ -387,6 +387,23 @@ reg4 <- feols(model4, data = dt , vcov="hetero")
 fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")           
 etable <- etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
 
+reg_results <- etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
+
+reg_stats <- setDF(reg_results)
+
+models <- c("Model 1", "Model 2", "Model 3", "Model 4")
+rmse <- c(reg_stats$reg1[46], reg_stats$reg2[46], reg_stats$reg3[46] ,reg_stats$reg4[46])
+bic <- c(reg_stats$reg1[45], reg_stats$reg2[45], reg_stats$reg3[45] ,reg_stats$reg4[45])
+vars <- c(reg_stats$reg1[49], reg_stats$reg2[49], reg_stats$reg3[49] ,reg_stats$reg4[49])
+reg_stats$reg2
+reg_results_table <- data.frame(models, bic, rmse, vars)
+
+colnames(reg_results_table)<- c("Model", "BIC", "RMSE","No. of coeff")
+
+reg_results_table <- reg_results_table %>% mutate_if(is.numeric, format) %>% 
+  kable( caption = "Model evaluation based on full sample RMSE and BIC") %>%
+  kable_styling(full_width = F, font_size = 10)
+
 ```
 
 ```{r,echo=FALSE, include=FALSE}
@@ -449,6 +466,7 @@ m_comp <- tibble( model = models ,
                   complexity = m_comp,
                   RMSE = rmse_cv )
 ```
+
 
 ```{r,echo=FALSE, include=FALSE}
 kfold <- ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
@@ -516,30 +534,31 @@ ggarrange(Sector_gender,Sector_Region,Status_gender,Union_gender,hjust=-0.6,ncol
 ```{r,echo=F,warning=F,fig.width=8,fig.height=10,fig.align="center"}
 ggarrange(Union_Sector,white_educ,white_gender,White_Status,hjust=-0.6,ncol=2,nrow=2)
 ```
+
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE,fig.align='left', show.fig = 'hold'}
+ cv_mat %>% kbl(caption = "Cross Validated RMSE", booktabs = T) %>%
+  kable_paper("striped", full_width = T) %>%
+  row_spec(5, bold = T)
+
+m_comp%>%kbl(caption = "Prediction performance", booktabs = T) %>% 
+  kable_paper("striped", full_width = T) %>%
+  row_spec(5, bold = T)
+
+
+```
+
+## Model of Best-Fit ~ Model 2
+```{r,echo=FALSE, message=FALSE, warning=FALSE,fig.align='left', show.fig = 'hold'}
+line
+```
+
 \newpage
 
-## Cross Validated RMSE
-```{r,echo=FALSE, message=FALSE, warning=FALSE}
- cv_mat %>% kbl(caption = "", booktabs = T) %>%
-  kable_styling(latex_options = c("scale_down",full_width = T))
-```
-
-## Prediction performance & model complexity
-```{r,echo=FALSE, message=FALSE, warning=FALSE}
-m_comp %>% kbl(caption = "", booktabs = T) %>%
-  kable_styling(latex_options = c("scale_down",full_width = T))
-```
-
-## Averaged RMSE on test samples
-```{r,echo=FALSE, message=FALSE, warning=FALSE}
-kfold
-```
-
-```{r,echo=FALSE, message=FALSE, warning=FALSE}
-
-etable %>% kbl(caption = "", booktabs = T) %>%
-  kable_styling(latex_options = c("scale_down",full_width = T))
+```{r,echo=FALSE, message=FALSE, warning=FALSE,fig.align='left', show.fig = 'hold'}
+reg_results_table %>% kable_paper("striped", full_width = T)
+etable %>% kbl(caption = "Regression Table", booktabs = T) %>%
+  kable_styling(latex_options = c("striped","scale",full_width = T))
 
 ```
-
 
