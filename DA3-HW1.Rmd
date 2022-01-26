@@ -1,40 +1,30 @@
 ---
-title: "DA 3"
+title: "Data Analysis 3 ~ Predictive Model"
 author: "Khawaja Hassan"
-date: "1/23/2022"
-output: pdf_document
+output:
+   pdf_document:
+     extra_dependencies: ["flafter"]
 ---
 
-
-
-```{r setup , echo=FALSE,include=FALSE}
-
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 rm(list=ls())
 #####################
 ## Import libraries##
 #####################
-install.packages("tinytex")
+
 library(tidyverse)
-# library(lspline)
-# library(cowplot)
-# library(boot)
 library(estimatr)
-# library(huxtable)
-# library(stargazer)
 library(modelsummary)
-# library(kableExtra)
-# library(dplyr)
+library(dplyr)
 library(data.table)
 library(fixest)
 library(caret)
-# library(skimr)
-# library(grid)
-# library(glmnet)
 library(gridExtra)
 
 ```
 
-```{r, echo=FALSE,include=FALSE}
+```{r,echo=FALSE}
 ###########################################
 ## Set data  functions##
 ###########################################
@@ -42,12 +32,9 @@ library(gridExtra)
 # Importing the data
 data_org <- fread("https://osf.io/4ay9x/download")
 
-
-
 ```
 
-```{r,echo=FALSE, warning=FALSE}
-
+```{r,echo=FALSE, include=FALSE}
 ################
 # Data Munging #
 ################
@@ -70,7 +57,7 @@ dt <- dt[uhours >= 40]
 # counting Number observation in each Education Level
 # Filter:Bachelor's degree or Higher (dropping 11 observation )
 
-dt[,.(count=.N), by= grade92]
+c <- dt[,.(count=.N), by= grade92]
 dt <- dt[grade92 >= 43]
 
 # Checking age greater than 20/ Min age is 22 with sufficient observation
@@ -86,12 +73,9 @@ to_filter[to_filter > 0]
 
 # dropping the ethnic column since there are 919 NA observation in the column 
 dt <- dt[, ethnic := NULL]
-
-
 ```
 
-
-```{r,echo=FALSE}
+```{r,echo=FALSE, include=FALSE}
 # Creating levels for grade92 variable in a new variable educ#
 dt <- dt[grade92 == 43, educ := "Bachelors"]
 dt <-dt[grade92 == 44, educ := "Masters"]
@@ -107,9 +91,6 @@ dt <- dt[, agesq := age^2]
 # checking result
 datasummary(w*factor(educ) + age ~ Mean + SD + Min + Max + P25 + P75 + N , data = dt)
 
-# Race
-
-datasummary( w*factor(race) ~ N + SD +Percent() + Mean, data = dt )
 # creating binary for white and non white
 dt$white <- ifelse(dt$race==1,1,0)
 dt <- dt %>%
@@ -130,17 +111,17 @@ dt[marital == 7, married_status := "never married"]
 dt <- dt %>%
   select(-c(marital))
 
-
 # Ownchild
 
-dt[,.(count=.N), by= ownchild]
+d <- dt[,.(count=.N), by= ownchild]
 
 # Create if individuals own child or no
   dt <- dt %>% mutate(ownchild=case_when(
   ownchild==0 ~ 0,
   TRUE ~ 1))
- datasummary( w*factor(ownchild) ~ N + SD + Mean, data = dt ) 
-  
+
+datasummary( w*factor(ownchild) ~ N + SD + Mean, data = dt ) 
+
 # dropping as it is the same as own child
 dt <- dt %>%
   select(-chldpres)
@@ -193,7 +174,7 @@ dt <- dt %>% select(-c(V1,hhid,intmonth,weight,occ2012,stfips,state))
 
 ```
 
-```{r, echo=FALSE}
+```{r,echo=FALSE, include=FALSE}
 ###############################
 ##Setting models interactions##
 ###############################
@@ -272,7 +253,6 @@ Sector_gender <- ggplot(dt, aes(x = factor(Sector), y = w,
   ggthemes::theme_economist() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
-
 #5#
 datasummary( w*unionmme*gender ~ N + Percent() + Mean, data = dt ) #4
 
@@ -291,6 +271,9 @@ Union_gender <- ggplot(dt, aes(x = factor(unionmme), y = w,
   ggthemes::theme_economist() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
+```
+
+```{r,echo=FALSE, include=FALSE}
 #6#
 datasummary( w*unionmme*Sector ~ N + Percent() + Mean, data = dt )#3
 
@@ -348,7 +331,11 @@ White_Status<- ggplot(dt, aes(x = factor(married_status), y = w,
 
 
 #10#
-datasummary(w*factor(educ)*region  ~ N + Percent() + Mean, data = dt )#4
+datasummary(w*factor(educ)*region  ~ N + Percent() + Mean, data = dt )
+```
+
+
+```{r,echo=FALSE, include=FALSE}
 #11#
 datasummary(w*origin*factor(educ)  ~ N + Percent() + Mean, data = dt) 
 # not including since the wage differential is minor and number of observation for Professional school is only 1
@@ -374,7 +361,7 @@ white_educ<- ggplot(dt, aes(x = factor(educ), y = w,
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 ```
 
-```{r,echo=FALSE,include=FALSE}
+```{r,echo=FALSE, include=FALSE}
 ###################################
 ## Setting up Regressions models ##
 ###################################
@@ -394,13 +381,14 @@ reg2 <- feols(model2, data = dt , vcov="hetero")
 reg3 <- feols(model3, data = dt , vcov="hetero")
 reg4 <- feols(model4, data = dt , vcov="hetero")
 
-
  # evaluation of the models: using all the sample#
 fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")           
 etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
 
+```
 
-#####################
+```{r,echo=FALSE, include=FALSE}
+#################################################################
 # Cross-validation for better evaluation of predictive performance
 # Simple k-fold cross validation setup:
 # 1) Used method for estimating the model: "lm" - linear model (y_hat = b0+b1*x1+b2*x2 + ...)
@@ -458,7 +446,9 @@ for( i in 1 : length(cv) ){
 m_comp <- tibble( model = models , 
                   complexity = m_comp,
                   RMSE = rmse_cv )
+```
 
+```{r,echo=FALSE, include=FALSE}
 kfold <- ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
   geom_point(color='red',size=2) +
   geom_line(color='blue',size=0.5)+
@@ -477,41 +467,43 @@ line <- ggplot(dt, aes(x=predict(reg2, dt), y=w)) +
 
 ```
 
-```{r}
-
+```{r,echo=FALSE, include=FALSE}
 ## Arranging interaction plots into a grid for better presentation
 
-grid.arrange(Sector_gender, Sector_Region, Status_gender, Union_gender,
+grid1 <- grid.arrange(Sector_gender, Sector_Region, Status_gender, Union_gender,
              nrow = 2, ncol = 2)
 
-grid.arrange( Union_Sector,white_gender,White_Status, nrow = 2, ncol = 2)
-
+grid2 <- grid.arrange( Union_Sector,white_gender,White_Status, nrow = 2, ncol = 2)
 
 ```
 
 ## Introduction ##
  
-The purpose of this project was to run analysis and prediction of [Occupational& Earning data set](https://osf.io/g8p9j/) with Regression Analysis. The ultimate goal was to optimize prediction model for the hourly earning based on a particular occupation to capture their interaction with the predictors. The occupation selected for our analysis was Secondary school teachers and their codes are provided in on the following [link](https://osf.io/57n9q/). 
+The purpose of this project was to run analysis and prediction of [Occupational & Earning data set](https://osf.io/g8p9j/) with Regression Analysis. The ultimate goal was to optimize prediction model for the hourly earning based on a particular occupation to capture their interaction with the predictors. 
 
 ## Data Cleaning & Munging ##
-
-The choice of occupation for our model was *Secondary Teacher* and the number observation after we filter it came around was 1100. However, before the data had to be modified before we could actually run our regression model and make our predictive analysis. The data cleaning was divided into three major parts filtering, adding categorical & binary variables and dropping columns which were not relevant or had missing values. For filtering, we included only those people whose minimum hour were greater than 40 to account for only full-time employees and dropped observation whose education level was less Bachelor Degree.Secondly, for the variables like married status, gender, class , state ,citizenship status we group them and made new categorical variable since the variation between the given categories were not that significant. Lastly, we dropped ethnic column since more than 90 percent of observation were missing , along with we removed the columns that were not used in our models.
+The choice of occupation for our model was *Secondary Teacher*.Before the data had to be modified before we could actually run our regression model and make our predictive analysis.For filtering, we included only those people whose minimum hour were greater than 40 to account for only full-time employees and dropped observation whose education level was less Bachelor Degree.Secondly, for the variables like married status, gender, class , state ,citizenship status we group them and made new categorical variable since the variation between the given categories were not that significant. 
 
 ## Variable Interaction ##
 
-Before we could start running regression model we had to account for the interaction between the variable and decide which predictor to choose. The base for selection of predictor was if the wage differential was greater than $2 and the number of observation were sufficient enough to make a comparison. Since we are looking at hourly wage even 2 dollar difference would make a huge difference if we compare weekly or the monthly wage. However, with some interaction like one with the origin and education the number of observation in were below 5 and thus we dropped the those interaction in the model. Moreover, there are several interaction we did run but did not added it in our model because there result were insignificant.
+Before we could start running regression model we had to account for the interaction between the variable and decide which predictor to choose. The base for selection of predictor was if the wage differential was greater than $2 and the number of observation were sufficient enough to make a comparison.However, with some interaction like one with the origin and education the number of observation were below 5 and thus we dropped those interaction in the model. 
 
-## Regression Model
+## Regression Model ##
 
 We build 4 predictive model starting from the basic and made our model more and more complex by adding predictors. Now once we run our model we had to validate their performance based on the following criteria
 
-1- RMSE in the full sample
-2- Cross-validated RMSE 
-3- BIC in the full sample
+*RMSE in the full sample*
+*Cross-validated RMSE* 
+*BIC in the full sample*.
 
-The result from the regression table showed that Model 4 had the lowest RMSE of 10.55, although in comparison to Model 3 the 
+The result from the regression table showed that Model 4 had the lowest RMSE of 10.55, although in comparison to Model 3 the difference is roughly 0.2. This may suggest that the model may be over-fitting. Moreover, when we check cross-validated RMSE the Model 3 shows the lowest value with very minor difference from Model 2. This suggest that there is very small difference when we compare the performance measures for these models.Lastly, we checked the BIC of the models on the full sample and determine that BIC was lowest for Model 2 in comparison. Higher BIC for the remaining model suggest that it is being penalize for model complexity. 
+
+To conclude, the final selection of model is based on the complexity of the models.Therefore we choose the *Model 2* as it is a simple model and also help us to avoid over fitting the live data. One more thing which we like to highlight is that even though the RMSE value is lowest in Model 3 but we still opt for Model 2 since their RMSE values are very close and Model2 is simpler.
 
 
 
-
+## Appendix ##
+```{r}
+line
+```
 
