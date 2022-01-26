@@ -5,36 +5,38 @@ date: "1/23/2022"
 output: pdf_document
 ---
 
-```{r setup, echo=FALSE,include=FALSE}
+
+
+```{r setup , echo=FALSE,include=FALSE}
 
 rm(list=ls())
 #####################
 ## Import libraries##
 #####################
-
+install.packages("tinytex")
 library(tidyverse)
-library(lspline)
-library(cowplot)
-library(boot)
+# library(lspline)
+# library(cowplot)
+# library(boot)
 library(estimatr)
-library(huxtable)
-library(stargazer)
+# library(huxtable)
+# library(stargazer)
 library(modelsummary)
-library(kableExtra)
-library(dplyr)
+# library(kableExtra)
+# library(dplyr)
 library(data.table)
 library(fixest)
 library(caret)
-library(skimr)
-library(grid)
-library(glmnet)
+# library(skimr)
+# library(grid)
+# library(glmnet)
 library(gridExtra)
 
 ```
 
 ```{r, echo=FALSE,include=FALSE}
 ###########################################
-## Set data dir, load theme and functions##
+## Set data  functions##
 ###########################################
 
 # Importing the data
@@ -51,7 +53,7 @@ data_org <- fread("https://osf.io/4ay9x/download")
 ################
 
 # Counting Number of Observation in each Occupation 
-data_org[,.(Count=.N),by=occ2012]
+a <- data_org[,.(Count=.N),by=occ2012]
 
 # Filtering the data for the chosen occupation (Secondary-Teacher)
 dt <- data_org %>% filter(occ2012==2320)
@@ -72,7 +74,7 @@ dt[,.(count=.N), by= grade92]
 dt <- dt[grade92 >= 43]
 
 # Checking age greater than 20/ Min age is 22 with sufficient observation
-dt[,.(count=.N), by= age]
+b <- dt[,.(count=.N), by= age]
 
 # Looking at a quick summary of some of the key variables
 datasummary(w + grade92 + age ~ Mean + SD + Min + Max + P25 + P75 + N , data = dt)
@@ -179,7 +181,7 @@ dt <- dt %>% select(-prcitshp)
 
 datasummary( w*factor(origin) ~ N + Percent() + Mean, data = dt ) 
 
-##Creating region baased on states, Used Aftabs ideas to group these codes in region 
+##Creating region based on states, Used Aftabs ideas to group these codes in region 
 
 dt <- dt[stfips %in% c("WA", "OR", "MT", "ID", "WY", "NV", "UT", "CO", "AZ", "NM", "HI", "AK", "CA"), region := "west"]
 dt <- dt[stfips %in% c("ND", "SD", "NE", "KS", "MN", "IA", "MO", "WI", "IL", "IN", "MI", "OH"), region := "mid-west"]
@@ -356,8 +358,20 @@ datasummary(w*factor(ownchild)*factor(gender) ~ N + Percent() + Mean, data = dt 
 # not including since the wage differential is minor
 
 #13#
-atasummary(w*factor(educ)*factor(white)  ~ N + Percent() + Mean, data = dt )#3
+datasummary(w*factor(white)*factor(educ)  ~ N + Percent() + Mean, data = dt )#3
 
+white_educ<- ggplot(dt, aes(x = factor(educ), y = w,
+                              fill = factor(white), color=factor(white))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+  stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+  scale_color_manual(name="",
+                     values=c('red','blue')) +
+  scale_fill_manual(name="",
+                    values=c('red','blue')) +
+  labs(x = "Education Level",y = "Wage per Hour (USD)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
+  ggthemes::theme_economist() +
+  theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 ```
 
 ```{r,echo=FALSE,include=FALSE}
@@ -369,9 +383,9 @@ model1 <- as.formula(w ~ educ)
 
 model2 <- as.formula(w ~ educ+age+agesq)
 
-model3 <- as.formula(w ~ educ+age+agesq+region+ownchild+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender)
+model3 <- as.formula(w ~ educ+age+agesq+region+ownchild+married_status+white+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender+white*educ)
 
-model4 <- as.formula(w ~ educ+age+agesq+region+ownchild+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender+factor(educ)*region+factor(white)*factor(married_status)+Sector*region+unionmme*gender+Sector*gender)
+model4 <- as.formula(w ~ educ+age+agesq+region+ownchild+married_status+white+ownchild+factor(white)*gender+married_status*gender+unionmme*Sector+unionmme*gender+white*educ+factor(educ)*region+factor(white)*factor(married_status)+Sector*region+unionmme*gender+Sector*gender)
 
 
 ### Running the regressions
@@ -414,6 +428,7 @@ cv4 <- train(model4, dt, method = "lm", trControl = trainControl(method = "cv", 
 cv <- c("cv1", "cv2", "cv3", "cv4")
 rmse_cv <- c()
 
+
 for(i in 1:length(cv)){
   rmse_cv[i] <- sqrt((get(cv[i])$resample[[1]][1]^2 +
                         get(cv[i])$resample[[1]][2]^2 +
@@ -444,20 +459,21 @@ m_comp <- tibble( model = models ,
                   complexity = m_comp,
                   RMSE = rmse_cv )
 
-ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
+kfold <- ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
   geom_point(color='red',size=2) +
   geom_line(color='blue',size=0.5)+
+  scale_y_continuous(limits = c(10.8,11.7))+
   labs(x='Number of explanatory variables',y='Averaged RMSE on test samples',
        title='Prediction performance and model compexity') +
-  ggthemes::theme_economist()
+  ggthemes::theme_economist_white()
 
 # plotting results
-ggplot(dt, aes(x=predict(reg3, dt), y=w)) + 
+line <- ggplot(dt, aes(x=predict(reg2, dt), y=w)) + 
   geom_point(alpha = 0.5) +
   geom_abline(intercept = 0, slope = 1, size = 0.5) +
   scale_x_continuous(limits = c(0,40)) + 
   scale_y_continuous(limits = c(0,60)) +
-  ggthemes::theme_economist()
+  ggthemes::theme_economist_white()
 
 ```
 
@@ -483,7 +499,19 @@ The choice of occupation for our model was *Secondary Teacher* and the number ob
 
 ## Variable Interaction ##
 
-Before we could start running regression model we had to account for the interaction between the variable and decide which predictor to choose. The base for selection of predictor was if the wage differential was greater than $2 and the number of observation were sufficient enough to make a comparison. Since we are looking at hourly wage even 2 dollar difference would make a huge difference if we see the weekly or the monthly scale.
+Before we could start running regression model we had to account for the interaction between the variable and decide which predictor to choose. The base for selection of predictor was if the wage differential was greater than $2 and the number of observation were sufficient enough to make a comparison. Since we are looking at hourly wage even 2 dollar difference would make a huge difference if we compare weekly or the monthly wage. However, with some interaction like one with the origin and education the number of observation in were below 5 and thus we dropped the those interaction in the model. Moreover, there are several interaction we did run but did not added it in our model because there result were insignificant.
+
+## Regression Model
+
+We build 4 predictive model starting from the basic and made our model more and more complex by adding predictors. Now once we run our model we had to validate their performance based on the following criteria
+
+1- RMSE in the full sample
+2- Cross-validated RMSE 
+3- BIC in the full sample
+
+The result from the regression table showed that Model 4 had the lowest RMSE of 10.55, although in comparison to Model 3 the 
+
+
 
 
 
