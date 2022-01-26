@@ -21,7 +21,8 @@ library(data.table)
 library(fixest)
 library(caret)
 library(gridExtra)
-
+library(kableExtra)
+library(ggpubr)
 ```
 
 ```{r,echo=FALSE}
@@ -194,7 +195,7 @@ white_gender <- ggplot(dt, aes(x = factor(white), y = w,
                     values=c('red','blue')) +
   labs(x = "Race",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 #2#
@@ -212,7 +213,7 @@ educ_gender <- ggplot(dt, aes(x = factor(educ), y = w,
                     values=c('red','blue')) +
   labs(x = "Education",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
@@ -231,7 +232,7 @@ Status_gender <- ggplot(dt, aes(x = factor(married_status), y = w,
                     values=c('red','blue')) +
   labs(x = "Married status",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 #4#
@@ -250,7 +251,7 @@ Sector_gender <- ggplot(dt, aes(x = factor(Sector), y = w,
                     values=c('red','blue')) +
   labs(x = "Sector",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 #5#
@@ -268,7 +269,7 @@ Union_gender <- ggplot(dt, aes(x = factor(unionmme), y = w,
                     values=c('red','blue')) +
   labs(x = "Union Membership",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 ```
@@ -288,7 +289,7 @@ Union_Sector <- ggplot(dt, aes(x = factor(unionmme), y = w,
                     values=c('red','blue')) +
   labs(x = "Union Membership",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 #7#
@@ -309,7 +310,7 @@ Sector_Region<- ggplot(dt, aes(x = factor(region), y = w,
                     values=c('red','blue')) +
   labs(x = "Region",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 #9#
@@ -326,7 +327,7 @@ White_Status<- ggplot(dt, aes(x = factor(married_status), y = w,
                     values=c('red','blue')) +
   labs(x = "Marriage Status",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 
 
@@ -347,6 +348,7 @@ datasummary(w*factor(ownchild)*factor(gender) ~ N + Percent() + Mean, data = dt 
 #13#
 datasummary(w*factor(white)*factor(educ)  ~ N + Percent() + Mean, data = dt )#3
 
+
 white_educ<- ggplot(dt, aes(x = factor(educ), y = w,
                               fill = factor(white), color=factor(white))) +
   geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
@@ -357,7 +359,7 @@ white_educ<- ggplot(dt, aes(x = factor(educ), y = w,
                     values=c('red','blue')) +
   labs(x = "Education Level",y = "Wage per Hour (USD)")+
   scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 70), breaks = seq(0,70, 10))+
-  ggthemes::theme_economist() +
+  ggthemes::theme_economist_white() +
   theme(legend.position = c(0.15,0.85), axis.text.x = element_text(angle=45, vjust=.5))
 ```
 
@@ -383,7 +385,7 @@ reg4 <- feols(model4, data = dt , vcov="hetero")
 
  # evaluation of the models: using all the sample#
 fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")           
-etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
+etable <- etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('aic','bic','rmse','r2','n','k'), keepFactors = TRUE )
 
 ```
 
@@ -470,10 +472,11 @@ line <- ggplot(dt, aes(x=predict(reg2, dt), y=w)) +
 ```{r,echo=FALSE, include=FALSE}
 ## Arranging interaction plots into a grid for better presentation
 
-grid1 <- grid.arrange(Sector_gender, Sector_Region, Status_gender, Union_gender,
-             nrow = 2, ncol = 2)
+grid1 <- grid.arrange( grobs = list(Sector_gender, Sector_Region, Status_gender, Union_gender),ncol=2)
+             # nrow = 2, ncol = 2)
 
-grid2 <- grid.arrange( Union_Sector,white_gender,White_Status, nrow = 2, ncol = 2)
+
+grid2 <- grid.arrange( grobs = list(Union_Sector,white_gender,White_Status) , ncol = 2)
 
 ```
 
@@ -503,7 +506,40 @@ To conclude, the final selection of model is based on the complexity of the mode
 
 
 ## Appendix ##
-```{r}
-line
+
+## Interactions Boxplot
+
+```{r,echo=F,warning=F,fig.width=8,fig.height=10,fig.align="center"}
+ggarrange(Sector_gender,Sector_Region,Status_gender,Union_gender,hjust=-0.6,ncol=2,nrow=2)
 ```
+\newpage
+```{r,echo=F,warning=F,fig.width=8,fig.height=10,fig.align="center"}
+ggarrange(Union_Sector,white_educ,white_gender,White_Status,hjust=-0.6,ncol=2,nrow=2)
+```
+\newpage
+
+## Cross Validated RMSE
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+ cv_mat %>% kbl(caption = "", booktabs = T) %>%
+  kable_styling(latex_options = c("scale_down",full_width = T))
+```
+
+## Prediction performance & model complexity
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+m_comp %>% kbl(caption = "", booktabs = T) %>%
+  kable_styling(latex_options = c("scale_down",full_width = T))
+```
+
+## Averaged RMSE on test samples
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+kfold
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+
+etable %>% kbl(caption = "", booktabs = T) %>%
+  kable_styling(latex_options = c("scale_down",full_width = T))
+
+```
+
 
