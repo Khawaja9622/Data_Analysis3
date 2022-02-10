@@ -1,0 +1,1060 @@
+---
+title: "Predictive Pricing Models For Airbnb Milan"
+author: "Khawaja Hassan"
+date: "2/9/2022"
+output:
+  html_document:
+    code_download: true
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# It is advised to start a new session for every case study
+# CLEAR MEMORY
+rm(list=ls())
+
+
+# Descriptive statistics and regressions
+library(tidyverse)
+library(caret)
+library(skimr)
+library(grid)
+library(glmnet)
+library(stargazer)
+library(xtable)
+library(directlabels)
+library(knitr)
+library(cowplot)
+library(rattle)
+library(ranger)
+library(Hmisc)
+library(kableExtra)
+library(ggcorrplot)
+library(rpart)
+library(rpart.plot)
+library(ggpubr)
+
+
+# set data dir, load theme and functions
+path <- "/Users/khawajahassan/BA21_Coding/Assignment_2/"
+
+source(paste0(path, "da_helper_function.R"))
+source(paste0(path, "theme_bg.R"))
+
+# data used
+data_in <- paste0(path, "Data/Clean/")
+data_out <- paste0(path, "Data/Clean/")
+output <- paste0(path,"Output/")
+
+
+options(digits = 3)
+
+#############
+# Load data #
+#############
+
+data <-
+  read_csv(paste0(data_in, "airbnb_Milan_workfile_adj.csv")) %>%
+  mutate_if(is.character, factor)
+
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+######################
+# Quick look at data #
+######################
+glimpse(data)
+
+
+# where do we have missing variables now?
+to_filter <- sapply(data, function(x) sum(is.na(x)))
+to_filter[to_filter > 0]
+
+
+
+#####################################
+# Look at some descriptive statistics
+#####################################
+
+#How is the average price changing  by `property_type`,?
+data %>%
+  group_by(property_type) %>%
+  summarise(count=n())
+  # dplyr::summarize(mean_price = mean(price, na.rm=TRUE)) %>% 
+  # summarise(count=n())
+
+
+price_vs_property_box <- ggplot(data = data, aes(x = property_type, y = price)) +
+  stat_boxplot(aes(group = property_type), geom = "errorbar", width = 0.3,
+               color = c(color[2],color[1],color[3],color[4]), size = 0.5, na.rm=T)+
+  geom_boxplot(aes(group = property_type),
+               color = c(color[2],color[1],color[3],color[4]), fill = c(color[2],color[1],color[3],color[4]),
+               size = 0.5, width = 0.6, alpha = 0.3, na.rm=T, outlier.shape = NA) +
+  scale_y_continuous(expand = c(0.01,0.01),limits = c(0,325), breaks = seq(0,350,50)) +
+  labs(x = "Property Type",y = "Price (Euros)")+
+  theme_bg()
+price_vs_property_box
+
+
+
+# Barchart  
+fig4 <- ggplot(data = data, aes(x = factor(n_accommodates), color = f_property_type, fill = f_property_type)) +
+  geom_bar(alpha=0.6, na.rm=T, width = 0.8) +
+  scale_color_manual(name="",
+                     values=c(color[2],color[1],color[3],color[4])) +
+  scale_fill_manual(name="",
+                    values=c(color[2],color[1],color[3],color[4])) +
+  labs(x = "Accomodates (Persons)",y = "Frequency")+
+  theme_classic() 
+fig4
+
+vis5<- ggarrange(
+  price_vs_property_box,
+  fig4,
+  nrow = 1)
+
+# Price Distribution
+ 
+ price_hist <- ggplot(data, aes( x = price)) +
+   geom_histogram(aes(y = (..count..)/sum(..count..)),fill = "cyan3", color = "black") +
+   theme_bw() +
+   scale_y_continuous(labels = label_percent()) +
+   ylab("Percent") + 
+   xlab("Price (Euros)")
+ price_hist
+ 
+ ln_price_hist <- ggplot(data, aes(x = log(price))) +
+   geom_histogram(aes(y = (..count..)/sum(..count..)),fill = "cyan3", color = "black") +
+   theme_bw() +
+   scale_y_continuous(labels = label_percent()) +
+   ylab("Percent") + 
+   xlab("ln(Price, Euros)")
+ ln_price_hist
+
+ 
+ 
+ price_hist_grid <- ggarrange(
+   price_hist,
+   ln_price_hist,
+   nrow = 1)
+ 
+
+ annotate_figure(price_hist_grid,bottom = 
+                   text_grob("Note: Apartments with 2-6 accommodation capacity. Histogram without extreme values (price < 300 Euros)"))
+                                      
+
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#####################
+# Setting up models #
+#####################
+
+
+# Basic Variables
+basic_lev  <- c("f_property_type", "n_accommodates", "n_beds",  "n_days_sincelast", "flag_days_sincelast")
+
+
+# Factorized variables
+basic_add <- c("f_bathrooms", "f_bedrooms", "f_neighbourhood_cleansed", "f_minimum_nights", "n_availability_365")
+
+
+reviews <- c("n_review_scores_rating", "flag_review_scores_rating","f_review_scores_rating",
+             "n_number_of_reviews","f_number_of_reviews","n_reviews_per_month","flag_reviews_per_month")
+
+host <- c("d_host_is_superhost", "d_host_identity_verified")
+
+# Dummy variables: Extras -> collect all options and create dummies
+dummies <-  grep("^d_.*", names(data), value = TRUE)        
+
+
+
+# Define models: simpler, extended -----------------------------------------------------------
+
+#################################
+# Look for interactions         #
+#################################
+
+## This huge correlation table shows how strongly numeric variables are correlated
+num_data <- data[,unlist(lapply(data, is.numeric))]  
+num_data <- num_data %>%  select(matches("^d_.*|^n_.*|^f_.*|^p.*"))
+
+corr <- round(cor(num_data), 1)
+ggcorrplot(corr)
+
+
+
+price_diff_by_variables4 <- function(df, factor_var, dummy_var, factor_lab, dummy_lab){
+  # Looking for interactions.
+  # It is a function it takes 3 arguments: 1) Your dataframe,
+  # 2) the factor variable (like room_type)
+  # 3)the dummy variable you are interested in (like TV)
+  
+  # Process your data frame and make a new dataframe which contains the stats
+  factor_var <- as.name(factor_var)
+  dummy_var <- as.name(dummy_var)
+  
+  stats <- df %>%
+    group_by(!!factor_var, !!dummy_var) %>%
+    dplyr::summarize(Mean = mean(price, na.rm=TRUE),
+                     se = sd(price)/sqrt(n()))
+  
+  stats[,2] <- lapply(stats[,2], factor)
+  
+  ggplot(stats, aes_string(colnames(stats)[1], colnames(stats)[3], fill = colnames(stats)[2]))+
+    geom_bar(stat='identity', position = position_dodge(width=0.9), alpha=0.8)+
+    geom_errorbar(aes(ymin=Mean-(1.96*se),ymax=Mean+(1.96*se)),
+                  position=position_dodge(width = 0.9), width = 0.25)+
+    scale_color_manual(name=dummy_lab,
+                       values=c(color[2],color[1],color[3],color[4])) +
+    scale_fill_manual(name=dummy_lab,
+                      values=c(color[2],color[1],color[3],color[4])) +
+    ylab('Mean Price')+
+    xlab(factor_lab) +
+    theme_bg()+
+    theme(panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.border=element_blank(),
+          axis.line=element_line(),
+          legend.position = "top",
+          #legend.position = c(0.7, 0.9),
+          legend.box = "vertical",
+          legend.text = element_text(size = 5),
+          legend.title = element_text(size = 5, face = "bold"),
+          legend.key.size = unit(x = 0.4, units = "cm")
+    )
+}
+
+
+
+# Plot interactions between room type/property type and all dummies
+sapply(dummies, function(x){
+  p <- price_diff_by_variables4(data, "f_property_type", x, "property_type", x)
+  print(p)
+})
+
+
+
+
+# Based on individual box plot for each amenity with property type, following will be interacted with property type
+
+interactions <- c("f_property_type*d_baking_sheet",
+"f_property_type*d_bathtub",
+"f_property_type*d_bed_linens",
+"f_property_type*d_cooking_basics",
+"f_property_type*d_dining_table",
+"f_property_type*d_dishes_and_silverware",
+"f_property_type*d_elevator",
+"f_property_type*d_essentials",
+"f_property_type*d_ethernet_connection",
+"f_property_type*d_freezer",
+"f_property_type*d_host_greets_you",
+"f_property_type*d_hot_tub",
+"f_property_type*d_hot_water",
+"f_property_type*d_laundromat_nearby",
+"f_property_type*d_lockbox",
+"f_property_type*d_microwave",
+"f_property_type*d_mini_fridge",
+"f_property_type*d_outdoor_furniture",
+"f_property_type*d_private_entrance",
+"f_property_type*d_safe",
+"f_property_type*d_single_level_home",
+"f_property_type*d_smart_lock",
+"f_property_type*d_smoke_alarm",
+"f_property_type*d_have_kitchen",
+"f_property_type*d_coffee_machine",
+"f_property_type*d_free_parking_on_premises",
+"f_property_type*d_paid_parking_on_premises",
+"f_property_type*d_wifi",
+"f_property_type*d_have_tv",
+"f_property_type*d_have_sound_system",
+"f_property_type*d_shampoo_toiletries",
+"f_property_type*d_have_washerdryer",
+"f_property_type*d_have_iron",
+"f_property_type*d_have_heating",
+"f_property_type*d_have_air_condfan",
+"f_property_type*d_balcony",
+"f_property_type*d_have_garden",
+"f_property_type*d_have_breakfast",
+"f_property_type*d_have_fitnessgym",
+"f_property_type*d_family_friendly",
+"f_property_type*d_have_clothing_storage",
+"f_property_type*d_host_is_superhost",
+"f_property_type*d_host_identity_verified")
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#################################
+# Create test and train samples #
+#################################
+# now all stuff runs on training vs test (holdout), alternative: 5-fold CV
+
+
+# create test and train samples (80% of observations in train sample)
+smp_size <- floor(0.8 * nrow(data))
+
+## K = 5
+k_folds <- 5
+# Define seed value
+seed_val <- 110
+
+train_ids <- sample(seq_len(nrow(data)), size = smp_size)
+data$train <- 0
+data$train[train_ids] <- 1
+# Create train and test sample variables
+data_train <- data %>% filter(train == 1)
+data_test <- data %>% filter(train == 0)
+
+#Building the most complex model to use in LASSO
+model4 <- paste0(" ~ ",paste(c(basic_lev, basic_add ,reviews, host, dummies, interactions),collapse = " + "))
+
+
+# Creating the most complex OLS model to run a LASSO. Here LASSO is being used as a tool to choose predictors
+
+# Set lasso tuning parameters:
+# a) basic setup
+train_control <- trainControl( method = "cv", number = k_folds)
+# b) tell the actual lambda (penalty parameter) to use for lasso
+tune_grid     <- expand.grid("alpha" = c(1), "lambda" = seq(0.05, 1, by = 0.05))
+# c) create a formula
+formula <- formula(paste0("price ", paste(setdiff(model4, "price"), collapse = " + ")))
+
+# Run LASSO
+set.seed(seed_val)
+lasso_model <- caret::train(formula,
+                            data = data_train,
+                            method = "glmnet",
+                            preProcess = c("center", "scale"),
+                            trControl = train_control,
+                            tuneGrid = tune_grid,
+                            na.action=na.exclude)
+# Check the output
+lasso_model
+# Penalty parameters
+lasso_model$bestTune
+# Check th optimal lambda parameter
+lasso_model$bestTune$lambda
+# Check the RMSE curve
+plot(lasso_model)
+
+# One can get the coefficients as well
+lasso_coeffs <- coef(lasso_model$finalModel, lasso_model$bestTune$lambda) %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "variable") %>%
+  rename(coefficient = `s1`)  # the column has a name "1", to be renamed
+
+print(lasso_coeffs)
+
+# Check the number of variables which actually has coefficients other than 0
+lasso_coeffs_nz<-lasso_coeffs %>%
+  filter(coefficient!=0)
+print(nrow(lasso_coeffs_nz))
+lasso_coeffs_nz
+
+write_csv(lasso_coeffs_nz,"NonZeroCoefficients.csv")
+
+# Get the RMSE of the Lasso model
+#   Note you should compare this to the test RMSE
+lasso_fitstats <- lasso_model$results %>%
+  filter(lambda == lasso_model$bestTune$lambda)
+lasso_fitstats
+
+# Create an auxiliary tibble
+lasso_add <- tibble(Model='LASSO', Coefficients=nrow(lasso_coeffs_nz),
+                    R_squared=lasso_fitstats$Rsquared, BIC = NA,
+                    Training_RMSE = NA, Test_RMSE = lasso_fitstats$RMSE )
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+## Interaction
+p1 <- price_diff_by_variables2(data, "f_property_type", "d_have_tv","Property Type", "Have tv") 
+p2 <- price_diff_by_variables2(data, "f_property_type", "d_hot_tub","Property Type", "Have hot tub")
+p3 <- price_diff_by_variables2(data, "f_property_type", "d_host_is_superhost","Property Type", "Super host")
+p4 <- price_diff_by_variables2(data, "f_property_type", "d_cooking_basics","Property Type", "Cooking basics") # <------------
+p5 <- price_diff_by_variables2(data, "f_property_type", "d_have_fitnessgym","Property Type", "Have fitness gym")
+
+p6 <- price_diff_by_variables2(data, "f_property_type", "d_shampoo_toiletries","Property Type", "Have Toiletries")
+
+g_interactions <- plot_grid(p1, p2, p3,
+                            p4, p5, p6, nrow=3, ncol=2)
+
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Basic Variables
+interactions <- c("f_property_type*d_baking_sheet","f_property_type*d_bathtub","f_property_type*d_bed_linens","f_property_type*d_dishes_and_silverware","f_property_type*d_elevator","f_property_type*d_essentials",
+                  "f_property_type*d_ethernet_connection","f_property_type*d_host_greets_you","f_property_type*d_hot_tub","f_property_type*d_microwave","f_property_type*d_mini_fridge","f_property_type*d_private_entrance",
+                  "f_property_type*d_safe","f_property_type*d_single_level_home","f_property_type*d_coffee_machine","f_property_type*d_paid_parking_on_premises","f_property_type*d_wifi","f_property_type*d_have_washerdryer",
+                  "f_property_type*d_have_iron","f_property_type*d_have_garden","f_property_type*d_have_breakfast","f_property_type*d_have_fitnessgym","f_property_type*d_family_friendly","f_property_type*d_have_clothing_storage",
+                  "f_property_type*d_host_is_superhost","f_property_type*d_host_identity_verified")
+
+dummies <-c("d_bathtub","d_building_staff","d_carbon_monoxide_alarm","d_cleaning_before_checkout",
+            "d_cleaning_products","d_cooking_basics","d_dishes_and_silverware","d_drying_rack_for_clothing","d_elevator",
+            "d_essentials","d_fire_extinguisher", "d_first_aid_kit","d_freezer","d_keypad","d_lockbox","d_long_term_stays_allowed",
+            "d_luggage_dropoff_allowed","d_outdoor_dining_area","d_roomdarkening_shades", "d_security_cameras_on_property",
+            "d_smart_lock","d_toaster", "d_window_guards", "d_wine_glasses","d_have_kitchen","d_have_oven","d_coffee_machine",
+            "d_have_gril","d_free_parking_on_premises","d_free_parking_on_street", "d_wifi", "d_have_cable", "d_shampoo_toiletries",
+            "d_have_iron", "d_have_air_condfan", "d_have_breakfast","d_have_workoffice","d_have_fitnessgym")
+
+basic_lev  <- c("f_property_type", "n_accommodates", "n_beds", "flag_days_sincelast")
+
+
+# Factorized variables
+basic_add <- c("f_bathrooms", "f_bedrooms", "f_neighbourhood_cleansed", "f_minimum_nights", "n_availability_365")
+
+
+reviews <- c("n_review_scores_rating", "flag_review_scores_rating",
+             "n_number_of_reviews","f_number_of_reviews","flag_reviews_per_month")
+
+host <- c("d_host_is_superhost")
+
+
+# Building OLS models
+
+model1 <- " ~ n_accommodates"
+model2 <- paste0(" ~ ",paste(basic_lev,collapse = " + "))
+model3 <- paste0(" ~ ",paste(c(basic_lev, basic_add, reviews, host, dummies ),collapse = " + "))
+
+m1 <-  "~ n_accommodates"
+m2 <- "~ n_accommodates+ basic_lev"
+m3 <- "~ n_accommodates+ basic_lev + basic_add + reviews + host + dummies"
+m4<- "~ n_accommodates+ basic_lev + basic_add + reviews + host + dummies + interaction"
+
+  
+  
+model_variables <- c( m1,m2,m3,m4)
+model_names <- c("M1", "M2", "M3","M4")
+model_table <- as.data.frame(cbind(model_names, model_variables))
+model_headings <- c("Model", "Predictor Variables")
+colnames(model_table) <- model_headings
+
+
+
+# Do the iteration
+
+library(fixest)
+for ( i in 1:4 ){
+  print(paste0( "Estimating model: " ,i ))
+  # Get the model name
+  model_name <-  paste0("model",i)
+  model_pretty_name <- paste0("M",i,"")
+  # Specify the formula
+  yvar <- "price"
+  xvars <- eval(parse(text = model_name))
+  formula <- formula(paste0(yvar,xvars))
+  
+  # Estimate model on the whole sample
+  model_work_data <- feols( formula , data = data_train , vcov='hetero' )
+  #  and get the summary statistics
+  fs  <- fitstat(model_work_data,c('rmse','r2','bic'))
+  BIC <- fs$bic
+  r2  <- fs$r2
+  rmse_train <- fs$rmse
+  ncoeff <- length( model_work_data$coefficients )
+  
+  # Do the k-fold estimation
+  set.seed(seed_val)
+  cv_i <- train( formula, data_train, method = "lm", 
+                 trControl = trainControl(method = "cv", number = k_folds))
+  rmse_test <- mean( cv_i$resample$RMSE )
+  
+  # Save the results
+  model_add <- tibble(Model=model_pretty_name, Coefficients=ncoeff,
+                      R_squared=r2, BIC = BIC, 
+                      Training_RMSE = rmse_train, Test_RMSE = rmse_test )
+  if ( i == 1 ){
+    model_results <- model_add
+  } else{
+    model_results <- rbind( model_results , model_add )
+  }
+}
+
+# Check summary table
+# Add it to final results
+
+model_results <- rbind( model_results , lasso_add )
+model_results
+
+## The purpose of model4 was primarily to include all the relevant variables and use it in LASSO to identify predictors with non-zero coefficients.##
+
+predictors_model3 <- c(basic_lev,basic_add, reviews, host, dummies)
+set.seed(110)
+system.time({
+  ols_model <- train(
+    formula(paste0("price ~", paste0(predictors_model3, collapse = " + "))),
+    data = data_train,
+    method = "lm",
+    trControl = train_control
+  )
+})
+ols_model_coeffs <-  ols_model$finalModel$coefficients
+ols_model_coeffs_df <- data.frame(
+  "variable" = names(ols_model_coeffs),
+  "ols_coefficient" = ols_model_coeffs
+) %>%
+  mutate(variable = gsub("`","",variable))
+
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+##################
+## Random Forest##
+##################
+
+predictors <- c(basic_lev, basic_add, host, reviews, dummies ,interactions)
+
+# set tuning 
+tune_grid <- expand.grid(
+  .mtry = c(8, 10, 12),
+  .splitrule = "variance",
+  .min.node.size = c(5, 10, 15)
+)
+
+set.seed(2022)
+
+system.time({
+  rf_model <- train(
+    formula(paste0("price ~", paste0(predictors, collapse = " + "))),
+    data = data_train,
+    method = "ranger",
+    trControl = train_control,
+    tuneGrid = tune_grid,
+    importance = "impurity"
+  )
+})
+rf_model
+
+rf_tuning_model_table <- rf_model$results %>%
+  dplyr::select(mtry, min.node.size, RMSE) %>%
+  dplyr::rename(nodes = min.node.size) %>%
+  spread(key = mtry, value = RMSE)
+
+
+
+
+# auto tuning first -
+
+set.seed(110)
+system.time({
+  rf_model_auto <- train(
+    formula(paste0("price ~", paste0(predictors, collapse = " + "))),
+    data = data_train,
+    method = "ranger",
+    trControl = train_control,
+    importance = "impurity"
+  )
+})
+rf_model_auto
+
+
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+##Variable Importance Plots Rf_model ##
+
+rf_model_var_imp <- ranger::importance(rf_model$finalModel)/1000
+
+rf_model_var_imp_df <-
+  data.frame(varname = names(rf_model_var_imp),imp = rf_model_var_imp) %>%
+  mutate(varname = gsub("f_neighbourhood_cleansed", "Neighbourhood:", varname) ) %>%
+  mutate(varname = gsub("f_property_type", "Property type:", varname) ) %>%
+  arrange(desc(imp)) %>%
+  mutate(imp_percentage = imp/sum(imp))
+
+rf_model_var_imp_df
+
+# to have a quick look
+
+plot(varImp(rf_model))
+
+# have a version with top 10 vars only
+ggplot(rf_model_var_imp_df[1:10,], aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(color='red', size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), color='red', size=0.75) +
+  ylab("Importance (Percent)") +
+  xlab("Variable Name") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw()
+
+##############################
+## 2) var_imp plot grouped ###
+##############################
+
+# grouped variable importance - keep binaries created off factors together
+
+varnames <- rf_model$finalModel$xNames
+
+f_neighbourhood_cleansed_varnames <- grep("f_neighbourhood_cleansed",varnames, value = TRUE)
+f_host_varnames <- grep("d_host",varnames, value = TRUE)
+f_property_type_varnames <- grep("f_property_type",varnames, value = TRUE)
+f_reviews_varnames <- grep("review",varnames, value = TRUE)
+a <- grep("d_",varnames, value = TRUE)
+b <- a[63:195]
+
+dummies_varnames <- b
+
+groups <- list(host=f_host_varnames,
+               property_type = f_property_type_varnames,
+               reviews = f_reviews_varnames,
+               neighbourhood=f_neighbourhood_cleansed_varnames,
+               Ammenities = dummies_varnames,
+               bathroom = "f_bathrooms",
+               minimum_nights = "f_minimum_nights",
+               n_accommodates = "n_accommodates",
+               availability_365="n_availability_365",
+               n_beds = "n_beds")
+
+# Need a function to calculate grouped var-imp
+
+group.importance <- function(rf.obj, groups) {
+  var.imp <- as.matrix(sapply(groups, function(g) {
+    sum(ranger::importance(rf.obj)[g], na.rm = TRUE)
+  }))
+  colnames(var.imp) <- "MeanDecreaseGini"
+  return(var.imp)
+}
+
+
+rf_model_var_imp_grouped <- group.importance(rf_model$finalModel, groups)
+rf_model_var_imp_grouped_df <- data.frame(varname = rownames(rf_model_var_imp_grouped),
+                                          imp = rf_model_var_imp_grouped[,1])  %>%
+  mutate(imp_percentage = imp/sum(imp))
+
+ggplot(rf_model_var_imp_grouped_df, aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(color='red', size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), color='red', size=0.7) +
+  ylab("Importance (Percent)") +   xlab("Variable Name") +
+  coord_flip() +
+  # expand=c(0,0),
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw()
+
+
+##Variable Importance Plots rf_model_auto
+
+rf_model_auto_var_imp <- ranger::importance(rf_model_auto$finalModel)/1000
+rf_model_auto_var_imp_df <-
+  data.frame(varname = names(rf_model_auto_var_imp),imp = rf_model_var_imp) %>%
+  mutate(varname = gsub("f_neighbourhood_cleansed", "Neighbourhood:", varname) ) %>%
+  mutate(varname = gsub("f_property_type", "Property type:", varname) ) %>%
+  arrange(desc(imp)) %>%
+  mutate(imp_percentage = imp/sum(imp))
+rf_model_auto_var_imp_df
+
+# to have a quick look
+
+plot(varImp(rf_model_auto))
+
+# have a version with top 10 vars only
+
+pdp_1 <- ggplot(rf_model_auto_var_imp_df[1:10,], aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(color='red', size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), color='red', size=0.75) +
+  ylab("Importance (Percent)") +
+  xlab("Variable Name") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bw()
+
+##############################
+# 2) varimp plot grouped
+
+##############################
+# grouped variable importance - keep binaries created off factors together
+
+varnames_auto <- rf_model_auto$finalModel$xNames
+
+f_neighbourhood_cleansed_varnames_auto <- grep("f_neighbourhood_cleansed",varnames, value = TRUE)
+f_host_varnames_auto <- grep("d_host",varnames_auto, value = TRUE)
+f_property_type_varnames_auto <- grep("f_property_type",varnames_auto, value = TRUE)
+f_reviews_varnames_auto <- grep("review",varnames_auto, value = TRUE)
+dummies_varnames_auto <- b
+
+
+
+
+groups_auto <- list(host=f_host_varnames_auto,
+               property_type = f_property_type_varnames_auto,
+               reviews = f_reviews_varnames_auto,
+               neighbourhood=f_neighbourhood_cleansed_varnames_auto,
+               Ammenities = dummies_varnames_auto,
+               bathroom = "f_bathrooms",
+               minimum_nights = "f_minimum_nights",
+               n_accommodates = "n_accommodates",
+               availability_365="n_availability_365",
+               n_beds = "n_beds")
+
+
+# Need a function to calculate grouped var-imp
+
+group.importance <- function(rf.obj, groups_auto) {
+  var.imp <- as.matrix(sapply(groups, function(g) {
+    sum(ranger::importance(rf.obj)[g], na.rm = TRUE)
+  }))
+  colnames(var.imp) <- "MeanDecreaseGini"
+  return(var.imp)
+}
+
+rf_model_auto_var_imp_grouped <- group.importance(rf_model_auto$finalModel, groups)
+rf_model_auto_var_imp_grouped_df <- data.frame(varname = rownames(rf_model_auto_var_imp_grouped),
+                                               imp = rf_model_auto_var_imp_grouped[,1])  %>%
+  mutate(imp_percentage = imp/sum(imp))
+
+pdp_2 <- ggplot(rf_model_auto_var_imp_grouped_df, aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(color='red', size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), color='red', size=0.7) +
+  ylab("Importance (Percent)") +   xlab("Variable Name") +
+  coord_flip() +
+  # expand=c(0,0),
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_bg()
+
+
+
+# evaluate random forests 
+
+results <- resamples(
+  list(
+    model_1  = rf_model,
+    model_auto  = rf_model_auto
+  )
+)
+summary(results)
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# CART with pruning
+
+# CART with built-in pruning
+
+set.seed(110)
+system.time({
+  cart_model <- train(
+    formula(paste0("price ~", paste0(predictors, collapse = " + "))),
+    data = data_train,
+    method = "rpart",
+    tuneLength = 10,
+    trControl = train_control
+  )
+})
+
+cart_model
+
+# Tree graph
+
+rpart.plot(cart_model$finalModel, tweak=1.2, digits=-1, extra=1)
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+final_models <-
+  list("OLS" = ols_model,
+       "CART" = cart_model,
+       "Random forest 1: Tuning provided" = rf_model,
+       "Random forest 2: Auto Tuning" = rf_model_auto)
+results <- resamples(final_models) %>% summary()
+results
+
+# Model selection is carried out on this CV RMSE
+
+result <- imap(final_models, ~{
+  mean(results$values[[paste0(.y,"~RMSE")]])
+}) %>% unlist() %>% as.data.frame() %>%
+  rename("CV RMSE" = ".")
+result
+
+
+# evaluate preferred model on the holdout set -----------------------------
+result_2 <- map(final_models, ~{
+  RMSE(predict(.x, newdata = data_test), data_test[["price"]])
+}) %>% unlist() %>% as.data.frame() %>%
+  rename("Holdout RMSE" = ".")
+result_2
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#########################################################################################
+# Partial Dependence Plots for the best model; random forest with specified tuning parameters
+#########################################################################################
+
+# 1) Property Type
+pdp_f_property_type <- pdp::partial(rf_model_auto, pred.var = "f_property_type", 
+                                    pred.grid = distinct_(data_test, "f_property_type"), 
+                                    train = data_train)
+ property_pdp <- pdp_f_property_type %>%
+  autoplot( ) +
+  geom_point(color='red', size=2) +
+  geom_line(color='red', size=1) +
+  ylab("Predicted price") +
+  xlab("Property Type") +
+  theme_bw()
+
+# 2) Number of accommodates
+pdp_n_accommodates <- pdp::partial(rf_model_auto, pred.var = "n_accommodates", 
+                                   pred.grid = distinct_(data_test, "n_accommodates"), 
+                                   train = data_train)
+acc_pdp <- pdp_n_accommodates %>%
+  autoplot( ) +
+  geom_point(color='red', size=4) +
+  ylab("Predicted price") +
+  xlab("Accommodates (persons)") +
+  scale_y_continuous(limits=c(80,115), breaks=seq(60,120, by=10)) +
+  scale_x_continuous(limits=c(1.5,4.5))+
+  theme_bw()
+
+
+#3) Neighbourhood 
+
+neighbourhood <- pdp::partial(rf_model_auto, pred.var = "f_neighbourhood_cleansed", 
+                              pred.grid = distinct_(data_test, "f_neighbourhood_cleansed"), 
+                              train = data_train)
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Sub-sample performance: RMSE / mean(y) ---------------------------------------
+# NOTE  we do this on the holdout set.
+# 
+
+data_holdout_w_prediction <- data_test %>%
+  mutate(predicted_price = predict(rf_model_auto, newdata = data_test))
+
+######### create nice summary table of heterogeneity
+
+a <- data_holdout_w_prediction %>%
+  mutate(is_low_size = ifelse(n_accommodates <= 3, "small apt", "large apt")) %>%
+  group_by(is_low_size) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+
+
+b <- data_holdout_w_prediction %>%
+  filter(n_beds %in% c("2","3", "4","5","6","7")) %>%
+  group_by(n_beds) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = rmse / mean_price
+  )
+
+c <- data_holdout_w_prediction %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+
+d <- data_holdout_w_prediction %>%
+  filter(f_property_type %in% c("apartment", "condo","loft")) %>%
+  group_by(f_property_type) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = rmse / mean_price
+  )
+
+## Save output ##
+
+colnames(a) <- c("", "RMSE", "Mean price", "RMSE/price")
+colnames(b) <- c("", "RMSE", "Mean price", "RMSE/price")
+c<- cbind("All", c)
+colnames(d) <- c("", "RMSE", "Mean price", "RMSE/price")
+
+line1 <- c("Apartment size", "", "", "")
+line2 <- c("Beds", "", "", "")
+line3 <- c("Property Type", "", "", "")
+
+result_3 <- rbind(line1,a,line2, b,line3,d) %>%
+  transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`),
+            `RMSE/price` = as.numeric(`RMSE/price`))
+result_3
+
+
+```
+
+```{r include=FALSE}
+# FIGURES FOR FITTED VS ACTUAL OUTCOME VARIABLES #
+##--------------------------------------------------
+
+Ylev <- data_test[["price"]]
+
+# Predicted values
+prediction_test_pred <- as.data.frame(predict(rf_model_auto, newdata = data_test, interval="predict"))
+
+predictionlev_test <- cbind(data_test[,c("price","n_accommodates")],
+                               prediction_test_pred)
+
+
+
+# Create data frame with the real and predicted values
+d <- data.frame(ylev=Ylev, predlev=predictionlev_test[,3] )
+# Check the differences
+d$elev <- d$ylev - d$predlev
+
+# Plot predicted vs price
+level_vs_pred <- ggplot(data = d) +
+  geom_point(aes(y=ylev, x=predlev), color = "purple", size = 1,
+             shape = 16, alpha = 0.5, show.legend=FALSE, na.rm=TRUE) +
+  geom_segment(aes(x = 0, y = 0, xend = 275, yend =275), size=0.8, color="black", linetype=2) +
+  labs(y = "Price (US dollars)", x = "Predicted price  (US dollars)") +
+  theme_bg()
+level_vs_pred
+```
+
+
+## Executive Summary
+
+The aim of the study was to assist company to predict prices for their small and mid-sized apartment accommodating 2-6 people using different prediction model. To build these price prediction models we will be using data from [Inside Airbnb](http://insideairbnb.com/get-the-data.html). To find the best combination algorithms to assess the prediction model we will be building and comparing Airbnb predictive models for the city of **Milan**, Italy. We used 3 machine learning algorithms like OLS Linear Regression, Random Forest, Cart. The best model amongst these came out to be GBM, followed by Random Forest (Auto-tuned). The code for the project is available at my [Github](https://github.com/Khawaja9622/Data_Analysis3/tree/main/Assignment_2).
+
+## Data Cleaning 
+
+Our choice provided a cross-sections of Milan listing with more than 16000 observations with last scrapping date of 9th January 2022. However, the data required immense cleaning in terms of extracting amenities into separate columns from their vector form and later clubbing them based on of some meaningful categories. There were around 1000 + separate amenities that is why we aggregated them based on similar characteristics (for example: shampoo, conditioner, bath-gel were collected under the heading of toiletries). We were able to narrow down amenities to 74 clubbed variables. [Function adapted from Viki Meszaros (https://github.com/Viki-Meszaros/CEU-Data-Analysis-3/tree/main/Assignment_1)] After this we prepared our data based on the case we have been provided with, for which we filtered the number of accommodates between 2-6 and took property type which was full apartment (Entire Loft, Entire Serviced Apartment, Entire Apartment, Entire Condominium)
+ 
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8}
+
+
+ annotate_figure(price_hist_grid,bottom = 
+                   text_grob("Note: Apartments with 2-6 accommodation capacity. Histogram without extreme values (price < 300 Euros)"))
+                                      
+```
+
+
+Moving further with the basic cleaning process, we had to figure how we will be dealing with the missing value in our dataset. Based on the designated variable importance we dealt with each of them differently. To begin with, we dropped all the observation where price was not available since we cannot be imputing our target variable. Then we checked the distribution of the price which was close to normally distributed therefore we decided to take price as the target variable and not the log price. If we did convert and took the log price we might end up in transformational errors when convert back to normal price. 
+
+#### Imputation
+Moving forward, we had to check what variable can be imputed based on the number of missing values in each of them. Here domain knowledge about the case was essential to come up with some logical assumptions. For number of beds where the value was missing, we took the assumption that it should corresponds 1.5 number of accommodates so for every 3 accommodates there will be at least 2 beds. Whereas, for number of bathrooms we imputed the missing based on the median the value. In this case we did not create any flag variable since the missing observation were below 5 % of the total observation. However, we had certain variable where missing observation was more than 30 % (example: Reviews per month, Review Score Rating) and for which we created flag variable first and then imputed their values with median. Consider the domain knowledge on Airbnb we know how important the reviews rating and the number of rating due to which these variables cannot be left out when constructing predictive pricing models.
+
+
+#### Explanatory variables
+
+The explanatory variables which were used in our models are as follows:
+
+- *Factor variables*: For each Neighbourhood, type of property, including flag and factorized variable of size variables. 
+- *Reviews variables*: Review score rating and the number of reviews the apartment gets each month.
+- *Host variables*: Created Dummies for host verification and they being a super host or not.
+- *Dummies*: Binary variables consisting of all the amenities that are being offered by host.
+- *Size variables*: This includes numeric variable like number of beds, baths, accommodates, and minimum nights.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8}
+g_interactions 
+```
+
+
+After setting these variables we had to look for the interaction of property type with other variables to check the impact on the mean prices. All those interactions where the mean price was greater than $2-3 those interaction was considered. The reason for this leniency in selecting the interaction was that we first used LASSO on our complex model which included all the variables and interactions. By taking this approach we were able to identify the variable with zero coefficient and disregard them. With the final choice of 126 variables, we move ahead in constructing our price prediction models.
+
+**Cross Validation & Holdout**
+
+To enhance our model performance, we will be dividing our 2500+ remaining observation at random at 20 % as hold set and remaining observation will be used as training set. These training set will then train through 5 test fold cross validation to provide least overfitting coefficients.
+
+# OLS Predictive Models
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8}
+model_table %>%
+  kbl(caption = "<center><strong>Versions of the Airbnb Apartment Price Prediction Models</strong></center>", escape = FALSE) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  kable_styling( position = "center")
+```
+ 
+ 
+To start off with our first methodology OLS we run our regression models, based on all the observation in our work set.  Using this we calculated the BIC and R-squared for each model respectively. Moreover, to get the Train RMSE and test RMSE we rerun our regression based on our training and test sets via 5-fold cross validations. The result from the model reflect that R-squared is highest in our model 4 where the number Coefficients are 239. However, in comparison if we check result from our BIC and test RMSE we see their value increasing, suggesting this model is overfitting and being penalized. Therefore, the finding of our OLS suggests using Model 3 where not only BIC is minimum but also our test RMSE is lowest.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+model_results %>% kbl(caption = "Comparing Model Fit Model Measures", escape = FALSE) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  kable_styling( position = "center")
+```
+
+
+# Random Forest 
+  
+This prediction methodology is based on combining result from many regressions tree, which involves constructing many imperfect trees and averaging the predictions of all the trees to reach the average. This allows for much better predictions than a single model. In our case we used the same holdout and training set and run our model with tuning parameter to allow cross validation to find the tuning parameter value with lowest RMSE in the test set. 
+
+Moreover, we will be adopting the same (from Bekes & Kezdi's RF tuning parameter choices) 3-by-3 for defining mtry tuning parameter and minimum number of observations in each tree split. For our number of variable (mtry) we took the range of 8-12 and for the minimum number of observations (min. nodes) in terminal nodes we have taken (5,10,15). The result from the cross validated test set RMSE values on the combination is shown as following.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8}
+rf_tuning_model_table%>% kbl(caption = "Random Forest RMSE by tuning parameters", escape = FALSE) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  kable_styling(full_width = F)
+```
+
+
+Our best set up based on the following result is at 5 observations in the terminal node and 12 variables at each split, where our RMSE is the lowest.  Along with this, we also use autotune built-in R function on our same model to get automated tuning parameters. The lowest cross validated RMSE in the autotune model was at 5 observations in the terminal node and 106 variables at each split. The average Test RMSE of Autotune model was 42.3 whereas for the prior model it was 43.1. Hence, we will be taking the second model for our prediction analysis.
+
+## Variable Importance 
+
+To uncover the pattern of association for x-y we created variable importance plot. With the help of this diagnostic tool, we can gain insight about the important variables. The following top 10 important variable plot shows variables which had the largest MSE reduction. In second chart these variables are just grouped based on their factors along with other numeric variables. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8,fig.height=3}
+fig6<- ggarrange(
+  pdp_1,
+  pdp_2,
+  nrow = 1)
+fig6
+```
+
+
+## Partial dependencies
+
+Based on the results from the variable importance plot we analyse the shape of association between average y and important x variables, condition on the rest (BEKES, 2022). We took two variables: number of accommodates and type of property and plot their **partial dependence (PDPs)**. The PDPs for the number accommodate shows a linear relationship with predicted prices. Whereas, for the property type the most expensive is loft followed by the apartment and condos.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8,fig.height=3}
+fig7<- ggarrange(
+  acc_pdp,
+  property_pdp,
+  nrow = 1)
+fig7
+```
+
+## Sub sample 
+
+To further check our RF performance, we run sub sample on three x variables as shown in the figure below. The prediction error is similar across apartment size and number of beds but in type of property the relative RMSE had major deviation under the type of apartment (suggesting it is difficult to predict the price). However, even the RMSE of type apartment is low and their mean prices are way higher than others it might suggest that other factors impacting its price. It can be the case that there are few observations in our apartment category and those apartments might be located near the city centre leading to higher prices.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+result_3%>% kbl(caption = "Performance across sub-sample", escape = FALSE) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  kable_styling( position = "center")
+```
+
+
+
+## Conclusion 
+
+Based on the results the **Random Forest** turned out to be the preferred model based on lowest CV RMSE value, with value marginally lower than OLS. Our final predictive pricing model was in coherence to the case study of Airbnb London pricing. The model produce under our study were like ones in the reference case. If we consider the mean prices of Milan, they were marginally higher than that of London’s. Moreover, the relative RMSE of our model showed that we can expect 42.3-dollar error in our live data with the assumption of higher validity (BEKES,2020). Having said that, The OLS model is slightly higher than our preferred model and it can come in handy along with our model since it will be providing us with magnitudes of our coefficients.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.pos='H'}
+result %>% kbl(caption = "Horse Race of Models CV RSME", escape = FALSE) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  kable_styling( position = "center")
+```
+
+
+
